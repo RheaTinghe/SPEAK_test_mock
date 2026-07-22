@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - claude/mock-exam-recording-save-1lqsoa
   workflow_dispatch:
 
 permissions:
