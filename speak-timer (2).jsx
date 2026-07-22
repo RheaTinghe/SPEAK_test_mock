@@ -15,6 +15,17 @@ const safeName = (s) => String(s).replace(/[\\/:*?"<>|\s·]+/g, "_").replace(/^_
 const dateStamp = () => { const d = new Date(); const p = (x) => String(x).padStart(2, "0"); return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`; };
 const dlUrl = (url, name) => { const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); };
 const dlBlob = (blob, name) => { const url = URL.createObjectURL(blob); dlUrl(url, name); setTimeout(() => URL.revokeObjectURL(url), 1500); };
+/* iOS 系统带一批恶搞语音(Albert/Zarvox/Bubbles…),自动选择时必须排除 */
+const NOVELTY_VOICE = /albert|bad news|bahh|bells|boing|bubbles|cellos|good news|jester|organ|superstar|trinoids|whisper|wobble|zarvox|fred|junior|kathy|ralph|grandma|grandpa|rocko|shelley|eddy|flo|reed|sandy/i;
+const PREFERRED_VOICE = /samantha|ava|allison|susan|zoe|nicky|joelle|evan|nathan|noelle|aria|jenny|guy|michelle|google us english|google uk english female|daniel|karen|moira|serena|tessa/i;
+const enVoices = (vs) => vs.filter((v) => (v.lang || "").replace("_", "-").toLowerCase().indexOf("en") === 0);
+const pickVoice = (vs, wantName) => {
+  const en = enVoices(vs);
+  if (wantName) { const hit = en.find((v) => v.name === wantName); if (hit) return hit; }
+  const good = en.filter((v) => !NOVELTY_VOICE.test(v.name));
+  const isUS = (v) => (v.lang || "").replace("_", "-") === "en-US";
+  return good.find((v) => PREFERRED_VOICE.test(v.name) && isUS(v)) || good.find((v) => PREFERRED_VOICE.test(v.name)) || good.find(isUS) || good[0] || en[0] || null;
+};
 const encodeWav = (parts, sampleRate) => {
   let len = 0; parts.forEach((p) => { len += p.length; });
   const data = new Float32Array(len); let off = 0; parts.forEach((p) => { data.set(p, off); off += p.length; });
@@ -418,6 +429,8 @@ export default function App() {
   const [override, setOverride] = useState("real");
   const [recordAudio, setRecordAudio] = useState(true);
   const [readAloud, setReadAloud] = useState(true);
+  const [voices, setVoices] = useState([]);
+  const [voiceName, setVoiceName] = useState("");
 
   const [queue, setQueue] = useState([]);
   const [qPos, setQPos] = useState(0);
@@ -437,7 +450,7 @@ export default function App() {
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
-    const load = () => window.speechSynthesis.getVoices();
+    const load = () => setVoices(enVoices(window.speechSynthesis.getVoices()));
     load();
     if (window.speechSynthesis.addEventListener) { window.speechSynthesis.addEventListener("voiceschanged", load); return () => window.speechSynthesis.removeEventListener("voiceschanged", load); }
   }, []);
@@ -474,8 +487,7 @@ export default function App() {
       setTimeout(() => {
         try {
           const u = new SpeechSynthesisUtterance(text); u.lang = "en-US"; u.rate = 0.92; u.volume = 1;
-          const vs = synth.getVoices();
-          const v = vs.find((x) => x.lang === "en-US" && x.localService) || vs.find((x) => (x.lang || "").replace("_", "-").indexOf("en") === 0);
+          const v = pickVoice(synth.getVoices(), voiceName);
           if (v) u.voice = v;
           u.onend = done; u.onerror = done;
           ttsUtterRef.current = u;
@@ -484,7 +496,7 @@ export default function App() {
       }, 150);
       setTimeout(done, Math.min(35000, 5000 + text.length * 100));
     } catch (e) { done(); }
-  }, [readAloud]);
+  }, [readAloud, voiceName]);
 
   const startRecorder = useCallback(async () => {
     if (!recordAudio) return;
@@ -603,9 +615,18 @@ export default function App() {
         <div><div style={{ fontSize: 15, fontWeight: 600 }}>同时录音回放</div><div style={{ fontSize: 12, color: C.faint, marginTop: 2 }}>结束后可回听自己的作答</div></div>
         <button onClick={() => setRecordAudio((v) => !v)} style={{ width: 52, height: 30, borderRadius: 16, border: "none", cursor: "pointer", background: recordAudio ? C.teal : C.line, position: "relative" }}><span style={{ position: "absolute", top: 3, left: recordAudio ? 25 : 3, width: 24, height: 24, borderRadius: "50%", background: "#fff", transition: "left .2s" }} /></button>
       </div>
-      <div style={{ ...card, marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div><div style={{ fontSize: 15, fontWeight: 600 }}>考官朗读题目</div><div style={{ fontSize: 12, color: C.faint, marginTop: 2 }}>准备阶段用英文语音读题,模拟现场</div></div>
-        <button onClick={() => setReadAloud((v) => !v)} style={{ width: 52, height: 30, borderRadius: 16, border: "none", cursor: "pointer", background: readAloud ? C.teal : C.line, position: "relative" }}><span style={{ position: "absolute", top: 3, left: readAloud ? 25 : 3, width: 24, height: 24, borderRadius: "50%", background: "#fff", transition: "left .2s" }} /></button>
+      <div style={{ ...card, marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div><div style={{ fontSize: 15, fontWeight: 600 }}>考官朗读题目</div><div style={{ fontSize: 12, color: C.faint, marginTop: 2 }}>读题结束后才开始准备/作答,模拟现场</div></div>
+          <button onClick={() => setReadAloud((v) => !v)} style={{ width: 52, height: 30, borderRadius: 16, border: "none", cursor: "pointer", background: readAloud ? C.teal : C.line, position: "relative", flexShrink: 0 }}><span style={{ position: "absolute", top: 3, left: readAloud ? 25 : 3, width: 24, height: 24, borderRadius: "50%", background: "#fff", transition: "left .2s" }} /></button>
+        </div>
+        {readAloud && voices.length > 0 && (<div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <select value={voiceName} onChange={(e) => setVoiceName(e.target.value)} style={{ flex: 1, minWidth: 0, padding: "10px 12px", borderRadius: 12, background: C.surface2, color: C.text, border: `1px solid ${C.line}`, fontSize: 13.5 }}>
+            <option value="">自动选择声音</option>
+            {voices.map((v) => <option key={v.name} value={v.name}>{v.name}{NOVELTY_VOICE.test(v.name) ? " (恶搞)" : ""} · {v.lang}</option>)}
+          </select>
+          <Btn kind="ghost" onClick={() => speakPrompt("Tell me about your field of study. You will have thirty seconds to answer.")} style={{ padding: "10px 14px", fontSize: 13.5, flexShrink: 0 }}>试听</Btn>
+        </div>)}
       </div>
       {!sttSupported && (<div style={{ ...card, borderColor: C.amber, marginBottom: 16, display: "flex", gap: 10, alignItems: "flex-start" }}><AlertTriangle size={18} color={C.amber} style={{ flexShrink: 0, marginTop: 1 }} /><div style={{ fontSize: 13, color: C.muted, lineHeight: 1.5 }}>当前浏览器不支持实时转文字(iOS Safari / 部分 App 内置浏览器)。<b style={{ color: C.text }}>计时、变色环、提示音、录音回放照常</b>。要逐句文字复盘请用电脑版 Chrome / Edge。</div></div>)}
       <Btn kind="primary" onClick={start} style={{ width: "100%", padding: 16, fontSize: 17 }}><Mic size={18} /> 开始</Btn>
