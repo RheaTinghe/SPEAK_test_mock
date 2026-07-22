@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Mic, RotateCcw, ArrowRight, Check, AlertTriangle, Download, History, Trash2 } from "lucide-react";
 
-/* 浅色主题:奶白底 + UW–Madison 校红 (#C5050C) 为主色 */
+/* 极简浅色主题:白 / 浅灰 / 银,石墨深灰为主色,信号色全部去饱和 */
 const C = {
-  bg: "#FBFAF6", surface: "#FFFFFF", surface2: "#F6F3EC", line: "#E9E4D9",
-  text: "#26282B", muted: "#68707A", faint: "#9AA1AA",
-  teal: "#C5050C", amber: "#D97706", red: "#C5050C", blue: "#3E7CB1", green: "#2E8B57",
+  bg: "#F7F7F8", surface: "#FFFFFF", surface2: "#F2F3F4", line: "#E5E7E9",
+  text: "#1E2124", muted: "#6C737B", faint: "#A3A9B0",
+  teal: "#2E3238", amber: "#C9861F", red: "#C2504A", blue: "#64748B", green: "#5E8C6E",
 };
 const f1 = (n) => (Math.round(n * 10) / 10).toFixed(1);
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
@@ -629,7 +629,7 @@ export default function App() {
   const curLimit = phase === "speak" ? (item?.speak || 45) : (item?.prep || 1);
   if (phase === "listen") { ringColor = C.blue; progress = 1; phaseLabel = "考官读题"; }
   else if (phase === "prep") { ringColor = C.blue; progress = clamp(remaining / curLimit, 0, 1); phaseLabel = "准备时间"; }
-  else { progress = clamp(remaining / curLimit, 0, 1); phaseLabel = "作答中"; const collect = curLimit <= 30 ? 8 : 10; ringColor = remaining > collect ? C.green : remaining > 5 ? C.amber : C.red; }
+  else { progress = clamp(remaining / curLimit, 0, 1); phaseLabel = "作答中"; const collect = curLimit <= 30 ? 8 : 10; ringColor = remaining > collect ? C.text : remaining > 5 ? C.amber : C.red; }
 
   const wrap = { minHeight: "100%", background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif", padding: "22px 18px 40px", boxSizing: "border-box" };
   const container = { maxWidth: 460, margin: "0 auto" };
@@ -715,7 +715,7 @@ export default function App() {
         <div style={{ fontSize: 11, letterSpacing: 2, color: C.teal, textTransform: "uppercase", marginBottom: 6, fontWeight: 700 }}>{item?.n}</div>
         <div style={{ fontSize: 15.5, lineHeight: 1.55 }}>{item?.prompt}</div>
       </div>
-      {hint && <div style={{ fontSize: 12, color: C.amber, background: "rgba(217,119,6,0.07)", border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px 12px", marginBottom: 16, lineHeight: 1.5 }}>⏱ {hint}</div>}
+      {hint && <div style={{ fontSize: 12, color: C.amber, background: "rgba(201,134,31,0.08)", border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px 12px", marginBottom: 16, lineHeight: 1.5 }}>⏱ {hint}</div>}
       {item?.visual && <Visual v={item.visual} />}
       <div style={{ marginBottom: 16 }}><Ring progress={progress} color={ringColor} remaining={remaining} phaseLabel={phaseLabel} limit={curLimit} showTarget={phase === "speak"} /></div>
       {phase === "listen" ? (
