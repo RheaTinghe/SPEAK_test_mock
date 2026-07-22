@@ -446,7 +446,7 @@ export default function App() {
   const mediaRecRef = useRef(null), streamRef = useRef(null), chunksRef = useRef([]), audioCtxRef = useRef(null);
   const speakStartRef = useRef(0), segsRef = useRef([]), lastEndRef = useRef(0), firstSpeechRef = useRef(null), transcriptRef = useRef("");
   const firedRef = useRef({}), finishedRef = useRef(false), curSpeakRef = useRef(45), queueRef = useRef([]), posRef = useRef(0);
-  const proceedRef = useRef(null), ttsUtterRef = useRef(null);
+  const proceedRef = useRef(null), ttsUtterRef = useRef(null), micPromiseRef = useRef(null);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
@@ -498,22 +498,35 @@ export default function App() {
     } catch (e) { done(); }
   }, [readAloud, voiceName]);
 
+  const getMic = useCallback(() => {
+    if (!micPromiseRef.current) micPromiseRef.current = navigator.mediaDevices.getUserMedia({ audio: true });
+    return micPromiseRef.current;
+  }, []);
+  const releaseMic = useCallback(() => { if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; micPromiseRef.current = null; }, []);
   const startRecorder = useCallback(async () => {
     if (!recordAudio) return;
-    try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); streamRef.current = stream; chunksRef.current = []; const mr = new MediaRecorder(stream); mr.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); }; mr.start(); mediaRecRef.current = mr; } catch (e) {}
-  }, [recordAudio]);
+    try {
+      let stream = await getMic();
+      if (!stream.getTracks().some((t) => t.readyState === "live")) { micPromiseRef.current = null; stream = await getMic(); }
+      streamRef.current = stream; chunksRef.current = []; const mr = new MediaRecorder(stream); mr.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); }; mr.start(); mediaRecRef.current = mr;
+    } catch (e) { micPromiseRef.current = null; }
+  }, [recordAudio, getMic]);
   const stopRecorder = useCallback(() => new Promise((resolve) => {
     const mr = mediaRecRef.current; if (!mr || mr.state === "inactive") { resolve(null); return; }
-    mr.onstop = () => { const blob = new Blob(chunksRef.current, { type: chunksRef.current[0]?.type || "audio/webm" }); const url = URL.createObjectURL(blob); if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop()); resolve({ url, mime: blob.type, blob }); };
+    mr.onstop = () => { const blob = new Blob(chunksRef.current, { type: chunksRef.current[0]?.type || "audio/webm" }); const url = URL.createObjectURL(blob); resolve({ url, mime: blob.type, blob }); };
     try { mr.stop(); } catch (e) { resolve(null); }
   }), []);
 
-  const beginSpeak = useCallback((pos) => {
+  const beginSpeak = useCallback(async (pos) => {
     stopTTS();
     const item = queueRef.current[pos]; setPhase("speak"); firedRef.current = {}; finishedRef.current = false;
     segsRef.current = []; lastEndRef.current = 0; firstSpeechRef.current = null; transcriptRef.current = ""; setLiveSegCount(0); setInterim("");
     curSpeakRef.current = item.speak; speakStartRef.current = Date.now(); phaseEndRef.current = Date.now() + item.speak * 1000; setRemaining(item.speak);
-    beep(660, 0.08, 0.12); shouldListenRef.current = true; if (sttSupported) startSTT(); startRecorder();
+    await startRecorder();
+    if (finishedRef.current) return;
+    // 计时以麦克风就绪为准重置 — 权限弹窗/设备启动的时间不占用作答时间
+    speakStartRef.current = Date.now(); phaseEndRef.current = Date.now() + item.speak * 1000; setRemaining(item.speak);
+    beep(660, 0.08, 0.12); shouldListenRef.current = true; if (sttSupported) startSTT();
   }, [sttSupported, startSTT, startRecorder, beep, stopTTS]);
 
   const beginPrep = useCallback((pos) => {
@@ -545,8 +558,8 @@ export default function App() {
     else verdict = { tone: "tight", text: `贴线 — 只剩 ${f1(rem)}s,收尾偏晚` };
     setResults((r) => [...r, { n: item.n, type: item.type, prompt: item.prompt, limit: item.speak, finishT, remainingAtFinish: rem, verdict, segs, transcript: transcriptRef.current, wpm, latency: firstSpeechRef.current, words, audioUrl, audioMime, audioBlob }]);
     if (pos + 1 < queueRef.current.length) { const np = pos + 1; posRef.current = np; setQPos(np); setTimeout(() => beginPrep(np), 900); }
-    else { clearInterval(tickRef.current); setScreen("review"); }
-  }, [stopSTT, stopRecorder, beginPrep]);
+    else { releaseMic(); clearInterval(tickRef.current); setScreen("review"); }
+  }, [stopSTT, stopRecorder, beginPrep, releaseMic]);
 
   const runTick = useCallback(() => {
     if (finishedRef.current || phase === "listen") return;
@@ -569,9 +582,10 @@ export default function App() {
     if (pick === "single") { const base = POOL[singleKey]; q = [override === "real" ? base : { ...base, speak: override }]; }
     else { q = SETS.find((s) => s.key === pick).items; }
     try { if (readAloud && window.speechSynthesis) { window.speechSynthesis.cancel(); window.speechSynthesis.speak(new SpeechSynthesisUtterance(" ")); } } catch (e) {}
+    if (recordAudio) getMic().catch(() => { micPromiseRef.current = null; });
     queueRef.current = q; posRef.current = 0; setQueue(q); setQPos(0); setResults([]); setScreen("active"); setTimeout(() => beginPrep(0), 60);
   };
-  const abort = () => { shouldListenRef.current = false; finishedRef.current = true; stopSTT(); stopTTS(); if (mediaRecRef.current && mediaRecRef.current.state !== "inactive") { try { mediaRecRef.current.stop(); } catch (e) {} } mediaRecRef.current = null; if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop()); clearInterval(tickRef.current); setScreen(results.length ? "review" : "setup"); };
+  const abort = () => { shouldListenRef.current = false; finishedRef.current = true; stopSTT(); stopTTS(); if (mediaRecRef.current && mediaRecRef.current.state !== "inactive") { try { mediaRecRef.current.stop(); } catch (e) {} } mediaRecRef.current = null; releaseMic(); clearInterval(tickRef.current); setScreen(results.length ? "review" : "setup"); };
   const reset = () => { setScreen("setup"); setResults([]); setQPos(0); setInterim(""); setLiveSegCount(0); };
 
   const item = queue[qPos];
