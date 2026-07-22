@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Mic, RotateCcw, ArrowRight, Check, AlertTriangle, Download, History, Trash2 } from "lucide-react";
 
+/* 浅色主题:奶白底 + UW–Madison 校红 (#C5050C) 为主色 */
 const C = {
-  bg: "#0E141B", surface: "#18222E", surface2: "#1F2C3A", line: "#2A3846",
-  text: "#EAF1F7", muted: "#8CA0B2", faint: "#5C6E7E",
-  teal: "#3FC9B0", amber: "#F6B24B", red: "#F1706A", blue: "#5AA9E6", green: "#57D08A",
+  bg: "#FBFAF6", surface: "#FFFFFF", surface2: "#F6F3EC", line: "#E9E4D9",
+  text: "#26282B", muted: "#68707A", faint: "#9AA1AA",
+  teal: "#C5050C", amber: "#D97706", red: "#C5050C", blue: "#3E7CB1", green: "#2E8B57",
 };
 const f1 = (n) => (Math.round(n * 10) / 10).toFixed(1);
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
@@ -408,12 +409,12 @@ const HINTS = {
 /* ======================= UI atoms ======================= */
 const Btn = ({ children, onClick, kind = "ghost", style, disabled }) => {
   const base = { border: "none", borderRadius: 14, fontSize: 16, fontWeight: 600, padding: "14px 18px", cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.4 : 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, WebkitTapHighlightColor: "transparent" };
-  const kinds = { primary: { background: C.teal, color: "#06231D" }, ghost: { background: C.surface2, color: C.text }, line: { background: "transparent", color: C.text, border: `1px solid ${C.line}` } };
+  const kinds = { primary: { background: C.teal, color: "#FFFFFF" }, ghost: { background: C.surface2, color: C.text }, line: { background: "transparent", color: C.text, border: `1px solid ${C.line}` } };
   return <button onClick={onClick} disabled={disabled} style={{ ...base, ...kinds[kind], ...style }}>{children}</button>;
 };
 const Seg = ({ options, value, onChange }) => (
   <div style={{ display: "flex", gap: 6, background: C.surface, padding: 5, borderRadius: 14 }}>
-    {options.map((o) => (<button key={String(o.v)} onClick={() => onChange(o.v)} style={{ flex: 1, border: "none", borderRadius: 10, padding: "10px 4px", fontSize: 14.5, fontWeight: 600, cursor: "pointer", background: value === o.v ? C.teal : "transparent", color: value === o.v ? "#06231D" : C.muted }}>{o.label}</button>))}
+    {options.map((o) => (<button key={String(o.v)} onClick={() => onChange(o.v)} style={{ flex: 1, border: "none", borderRadius: 10, padding: "10px 4px", fontSize: 14.5, fontWeight: 600, cursor: "pointer", background: value === o.v ? C.teal : "transparent", color: value === o.v ? "#FFFFFF" : C.muted }}>{o.label}</button>))}
   </div>
 );
 const Ring = ({ progress, color, remaining, phaseLabel, limit, showTarget }) => {
@@ -628,11 +629,11 @@ export default function App() {
   const curLimit = phase === "speak" ? (item?.speak || 45) : (item?.prep || 1);
   if (phase === "listen") { ringColor = C.blue; progress = 1; phaseLabel = "考官读题"; }
   else if (phase === "prep") { ringColor = C.blue; progress = clamp(remaining / curLimit, 0, 1); phaseLabel = "准备时间"; }
-  else { progress = clamp(remaining / curLimit, 0, 1); phaseLabel = "作答中"; const collect = curLimit <= 30 ? 8 : 10; ringColor = remaining > collect ? C.teal : remaining > 5 ? C.amber : C.red; }
+  else { progress = clamp(remaining / curLimit, 0, 1); phaseLabel = "作答中"; const collect = curLimit <= 30 ? 8 : 10; ringColor = remaining > collect ? C.green : remaining > 5 ? C.amber : C.red; }
 
   const wrap = { minHeight: "100%", background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif", padding: "22px 18px 40px", boxSizing: "border-box" };
   const container = { maxWidth: 460, margin: "0 auto" };
-  const card = { background: C.surface, borderRadius: 18, padding: 18, border: `1px solid ${C.line}` };
+  const card = { background: C.surface, borderRadius: 18, padding: 18, border: `1px solid ${C.line}`, boxShadow: "0 1px 3px rgba(38,40,43,0.04)" };
 
   if (screen === "setup") {
     return (<div style={wrap}><div style={container}>
@@ -645,7 +646,7 @@ export default function App() {
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
         {SETS.map((s) => { const on = pick === s.key; return (
           <button key={s.key} onClick={() => setPick(s.key)} style={{ textAlign: "left", background: on ? C.surface2 : C.surface, border: `1.5px solid ${on ? TAGC[s.tag] : C.line}`, borderRadius: 14, padding: "12px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "#06231D", background: TAGC[s.tag], borderRadius: 6, padding: "3px 7px", flexShrink: 0 }}>{s.tag}</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#FFFFFF", background: TAGC[s.tag], borderRadius: 6, padding: "3px 7px", flexShrink: 0 }}>{s.tag}</span>
             <span style={{ flex: 1 }}><span style={{ display: "block", fontSize: 15, fontWeight: 600, color: C.text }}>{s.name}</span><span style={{ display: "block", fontSize: 12, color: C.faint, marginTop: 2 }}>{s.note}</span></span>
             <span style={{ fontSize: 11, color: C.muted, textAlign: "right", flexShrink: 0 }}>{s.items.length} 题<br />~{estMin(s.items)} 分</span>
           </button>); })}
@@ -714,7 +715,7 @@ export default function App() {
         <div style={{ fontSize: 11, letterSpacing: 2, color: C.teal, textTransform: "uppercase", marginBottom: 6, fontWeight: 700 }}>{item?.n}</div>
         <div style={{ fontSize: 15.5, lineHeight: 1.55 }}>{item?.prompt}</div>
       </div>
-      {hint && <div style={{ fontSize: 12, color: C.amber, background: "rgba(246,178,75,0.08)", border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px 12px", marginBottom: 16, lineHeight: 1.5 }}>⏱ {hint}</div>}
+      {hint && <div style={{ fontSize: 12, color: C.amber, background: "rgba(217,119,6,0.07)", border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px 12px", marginBottom: 16, lineHeight: 1.5 }}>⏱ {hint}</div>}
       {item?.visual && <Visual v={item.visual} />}
       <div style={{ marginBottom: 16 }}><Ring progress={progress} color={ringColor} remaining={remaining} phaseLabel={phaseLabel} limit={curLimit} showTarget={phase === "speak"} /></div>
       {phase === "listen" ? (
