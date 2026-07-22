@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { Mic, RotateCcw, ArrowRight, Check, AlertTriangle, Download } from "lucide-react";
+import { Mic, RotateCcw, ArrowRight, Check, AlertTriangle, Download, History, Trash2 } from "lucide-react";
 
 const C = {
   bg: "#0E141B", surface: "#18222E", surface2: "#1F2C3A", line: "#2A3846",
@@ -15,6 +15,23 @@ const safeName = (s) => String(s).replace(/[\\/:*?"<>|\s·]+/g, "_").replace(/^_
 const dateStamp = () => { const d = new Date(); const p = (x) => String(x).padStart(2, "0"); return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`; };
 const dlUrl = (url, name) => { const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); };
 const dlBlob = (blob, name) => { const url = URL.createObjectURL(blob); dlUrl(url, name); setTimeout(() => URL.revokeObjectURL(url), 1500); };
+/* 手机上优先走系统分享面板(存文件/微信/AirDrop),不支持或被拒时退回普通下载 */
+const shareOrDownload = async (items) => {
+  try {
+    const files = items.map((i) => new File([i.blob], i.name, { type: i.blob.type || "application/octet-stream" }));
+    if (navigator.canShare && navigator.canShare({ files })) { await navigator.share({ files }); return; }
+  } catch (e) { if (e && e.name === "AbortError") return; }
+  items.forEach((i, idx) => setTimeout(() => dlBlob(i.blob, i.name), idx * 400));
+};
+/* ---------- 本地历史记录 (IndexedDB) ---------- */
+const openDB = () => new Promise((res, rej) => {
+  const rq = indexedDB.open("speak-mock", 1);
+  rq.onupgradeneeded = () => { rq.result.createObjectStore("sessions", { keyPath: "id", autoIncrement: true }); };
+  rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
+});
+const dbAdd = async (rec) => { const db = await openDB(); return new Promise((res, rej) => { const tx = db.transaction("sessions", "readwrite"); tx.objectStore("sessions").add(rec); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); };
+const dbAll = async () => { const db = await openDB(); return new Promise((res, rej) => { const rq = db.transaction("sessions").objectStore("sessions").getAll(); rq.onsuccess = () => res(rq.result || []); rq.onerror = () => rej(rq.error); }); };
+const dbDel = async (id) => { const db = await openDB(); return new Promise((res, rej) => { const tx = db.transaction("sessions", "readwrite"); tx.objectStore("sessions").delete(id); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); };
 /* iOS 系统带一批恶搞语音(Albert/Zarvox/Bubbles…),自动选择时必须排除 */
 const NOVELTY_VOICE = /albert|bad news|bahh|bells|boing|bubbles|cellos|good news|jester|organ|superstar|trinoids|whisper|wobble|zarvox|fred|junior|kathy|ralph|grandma|grandpa|rocko|shelley|eddy|flo|reed|sandy/i;
 const PREFERRED_VOICE = /samantha|ava|allison|susan|zoe|nicky|joelle|evan|nathan|noelle|aria|jenny|guy|michelle|google us english|google uk english female|daniel|karen|moira|serena|tessa/i;
@@ -431,6 +448,8 @@ export default function App() {
   const [readAloud, setReadAloud] = useState(true);
   const [voices, setVoices] = useState([]);
   const [voiceName, setVoiceName] = useState("");
+  const [history, setHistory] = useState([]);
+  const [sessionName, setSessionName] = useState("");
 
   const [queue, setQueue] = useState([]);
   const [qPos, setQPos] = useState(0);
@@ -447,6 +466,15 @@ export default function App() {
   const speakStartRef = useRef(0), segsRef = useRef([]), lastEndRef = useRef(0), firstSpeechRef = useRef(null), transcriptRef = useRef("");
   const firedRef = useRef({}), finishedRef = useRef(false), curSpeakRef = useRef(45), queueRef = useRef([]), posRef = useRef(0);
   const proceedRef = useRef(null), ttsUtterRef = useRef(null), micPromiseRef = useRef(null);
+  const savedRef = useRef(false), fromHistoryRef = useRef(false);
+
+  useEffect(() => { if (screen === "setup" || screen === "history") dbAll().then((l) => setHistory(l.sort((a, b) => b.when - a.when))).catch(() => {}); }, [screen]);
+  useEffect(() => {
+    if (screen !== "review" || !results.length || savedRef.current || fromHistoryRef.current) return;
+    savedRef.current = true;
+    const g = results.filter((r) => r.verdict.tone === "good").length;
+    dbAdd({ when: Date.now(), name: sessionName, total: results.length, good: g, results: results.map(({ audioUrl, ...r }) => r) }).catch(() => {});
+  }, [screen, results, sessionName]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
@@ -581,12 +609,19 @@ export default function App() {
     let q;
     if (pick === "single") { const base = POOL[singleKey]; q = [override === "real" ? base : { ...base, speak: override }]; }
     else { q = SETS.find((s) => s.key === pick).items; }
+    savedRef.current = false; fromHistoryRef.current = false;
+    setSessionName(pick === "single" ? "单题练习" : (SETS.find((s) => s.key === pick)?.name || ""));
     try { if (readAloud && window.speechSynthesis) { window.speechSynthesis.cancel(); window.speechSynthesis.speak(new SpeechSynthesisUtterance(" ")); } } catch (e) {}
     if (recordAudio) getMic().catch(() => { micPromiseRef.current = null; });
     queueRef.current = q; posRef.current = 0; setQueue(q); setQPos(0); setResults([]); setScreen("active"); setTimeout(() => beginPrep(0), 60);
   };
   const abort = () => { shouldListenRef.current = false; finishedRef.current = true; stopSTT(); stopTTS(); if (mediaRecRef.current && mediaRecRef.current.state !== "inactive") { try { mediaRecRef.current.stop(); } catch (e) {} } mediaRecRef.current = null; releaseMic(); clearInterval(tickRef.current); setScreen(results.length ? "review" : "setup"); };
-  const reset = () => { setScreen("setup"); setResults([]); setQPos(0); setInterim(""); setLiveSegCount(0); };
+  const reset = () => { fromHistoryRef.current = false; setScreen("setup"); setResults([]); setQPos(0); setInterim(""); setLiveSegCount(0); };
+  const openHistory = (h) => {
+    fromHistoryRef.current = true; setSessionName(h.name || "历史模考");
+    setResults((h.results || []).map((r) => ({ ...r, audioUrl: r.audioBlob ? URL.createObjectURL(r.audioBlob) : null })));
+    setScreen("review");
+  };
 
   const item = queue[qPos];
   let ringColor = C.blue, progress = 0, phaseLabel = "准备";
@@ -644,7 +679,24 @@ export default function App() {
       </div>
       {!sttSupported && (<div style={{ ...card, borderColor: C.amber, marginBottom: 16, display: "flex", gap: 10, alignItems: "flex-start" }}><AlertTriangle size={18} color={C.amber} style={{ flexShrink: 0, marginTop: 1 }} /><div style={{ fontSize: 13, color: C.muted, lineHeight: 1.5 }}>当前浏览器不支持实时转文字(iOS Safari / 部分 App 内置浏览器)。<b style={{ color: C.text }}>计时、变色环、提示音、录音回放照常</b>。要逐句文字复盘请用电脑版 Chrome / Edge。</div></div>)}
       <Btn kind="primary" onClick={start} style={{ width: "100%", padding: 16, fontSize: 17 }}><Mic size={18} /> 开始</Btn>
+      {history.length > 0 && <Btn kind="ghost" onClick={() => setScreen("history")} style={{ width: "100%", marginTop: 10, fontSize: 15 }}><History size={16} /> 历史模考记录 ({history.length})</Btn>}
       <p style={{ fontSize: 12, color: C.faint, textAlign: "center", marginTop: 14, lineHeight: 1.6 }}>提示音:进入收尾窗口一声 → 5 秒目标点双响 → 到点低音。<br />开始后别停,像真考试一样连续录。</p>
+    </div></div>);
+  }
+
+  if (screen === "history") {
+    return (<div style={wrap}><div style={container}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}><h1 style={{ fontSize: 22, margin: 0, fontWeight: 700 }}>历史模考记录</h1><Btn kind="line" onClick={() => setScreen("setup")} style={{ padding: "10px 14px", fontSize: 14 }}>返回</Btn></div>
+      <p style={{ fontSize: 12, color: C.faint, lineHeight: 1.6, marginTop: 0, marginBottom: 14 }}>每场模考(含录音)自动保存在本机浏览器里。注意:长期不打开本站,iPhone 可能会清理这些数据 — 重要的场次请点进去用「导出完整版」永久备份。</p>
+      {history.length === 0 && <div style={{ ...card, color: C.muted, fontSize: 14 }}>还没有保存的模考,练一套就会自动出现在这里。</div>}
+      {history.map((h) => (<div key={h.id} style={{ ...card, marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 15, fontWeight: 600 }}>{h.name || "模考"}</div>
+          <div style={{ fontSize: 12, color: C.faint, marginTop: 3 }}>{new Date(h.when).toLocaleString()} · {h.total} 题 · 命中收尾 {h.good}/{h.total}</div>
+        </div>
+        <Btn kind="ghost" onClick={() => openHistory(h)} style={{ padding: "9px 14px", fontSize: 13.5, flexShrink: 0 }}>查看</Btn>
+        <button onClick={() => { dbDel(h.id).then(() => setHistory((l) => l.filter((x) => x.id !== h.id))).catch(() => {}); }} title="删除" style={{ background: "none", border: "none", color: C.faint, cursor: "pointer", padding: 6, flexShrink: 0 }}><Trash2 size={16} /></button>
+      </div>))}
     </div></div>);
   }
 
@@ -690,40 +742,41 @@ export default function App() {
     const data = {
       app: "UW–Madison SPEAK 控时训练",
       exportedAt: new Date().toISOString(),
-      set: pick === "single" ? "单题练习" : (SETS.find((s) => s.key === pick)?.name || pick),
+      set: sessionName,
       summary: { total: results.length, hitWindow: good, avgRemainSec: +f1(avgRemain), avgWpm },
       results: results.map(({ audioUrl, audioMime, audioBlob, verdict, ...r }) => ({ ...r, verdict: verdict.text, hasAudio: !!audioUrl })),
     };
-    dlBlob(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }), `SPEAK_模考记录_${stamp}.json`);
+    shareOrDownload([{ blob: new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }), name: `SPEAK_模考记录_${stamp}.json` }]);
   };
-  const saveAllAudio = () => { results.forEach((r, i) => { if (r.audioUrl) setTimeout(() => dlUrl(r.audioUrl, `SPEAK_${stamp}_${safeName(r.n)}.${extFromMime(r.audioMime)}`), i * 350); }); };
+  const saveAllAudio = () => { shareOrDownload(results.filter((r) => r.audioBlob).map((r) => ({ blob: r.audioBlob, name: `SPEAK_${stamp}_${safeName(r.n)}.${extFromMime(r.audioMime)}` }))); };
   const audioCount = results.filter((r) => r.audioUrl).length;
   const exportFull = async () => {
-    const setName = pick === "single" ? "单题练习" : (SETS.find((s) => s.key === pick)?.name || pick);
-    const lines = ["UW–Madison SPEAK 模考完整记录", `套卷: ${setName}`, `导出时间: ${new Date().toLocaleString()}`, `命中收尾窗口: ${good}/${results.length}` + (avgWpm ? ` · 平均语速: ${avgWpm} wpm` : ""), ""];
+    const lines = ["UW–Madison SPEAK 模考完整记录", `套卷: ${sessionName}`, `导出时间: ${new Date().toLocaleString()}`, `命中收尾窗口: ${good}/${results.length}` + (avgWpm ? ` · 平均语速: ${avgWpm} wpm` : ""), ""];
     results.forEach((r) => {
       lines.push(`【${r.n} · ${r.type}】时限 ${r.limit}s`, `题目: ${r.prompt}`, `判定: ${r.verdict.text}`, `用时 ${f1(r.finishT)}s` + (r.wpm ? ` · 语速 ${r.wpm} wpm` : "") + (r.words ? ` · ${r.words} 词` : ""), `转写: ${r.transcript || "(无)"}`, "");
     });
-    dlBlob(new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" }), `SPEAK_完整模考_${stamp}.txt`);
+    const files = [{ blob: new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" }), name: `SPEAK_完整模考_${stamp}.txt` }];
     const withAudio = results.filter((r) => r.audioBlob);
-    if (!withAudio.length) return;
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const parts = [];
-      for (const r of withAudio) {
-        const buf = await ctx.decodeAudioData(await r.audioBlob.arrayBuffer());
-        const mono = new Float32Array(buf.length);
-        for (let c = 0; c < buf.numberOfChannels; c++) { const d = buf.getChannelData(c); for (let i = 0; i < d.length; i++) mono[i] += d[i] / buf.numberOfChannels; }
-        parts.push(mono, new Float32Array(Math.round(ctx.sampleRate * 0.8)));
-      }
-      setTimeout(() => dlBlob(encodeWav(parts, ctx.sampleRate), `SPEAK_完整模考_${stamp}.wav`), 400);
-      ctx.close();
-    } catch (e) { alert("拼接录音失败,请改用逐题保存。(" + (e && e.message) + ")"); }
+    if (withAudio.length) {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const parts = [];
+        for (const r of withAudio) {
+          const buf = await ctx.decodeAudioData(await r.audioBlob.arrayBuffer());
+          const mono = new Float32Array(buf.length);
+          for (let c = 0; c < buf.numberOfChannels; c++) { const d = buf.getChannelData(c); for (let i = 0; i < d.length; i++) mono[i] += d[i] / buf.numberOfChannels; }
+          parts.push(mono, new Float32Array(Math.round(ctx.sampleRate * 0.8)));
+        }
+        files.push({ blob: encodeWav(parts, ctx.sampleRate), name: `SPEAK_完整模考_${stamp}.wav` });
+        ctx.close();
+      } catch (e) { alert("拼接录音失败,先只导出文字报告,录音请用逐题保存。"); }
+    }
+    shareOrDownload(files);
   };
   return (<div style={wrap}><div style={container}>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}><h1 style={{ fontSize: 22, margin: 0, fontWeight: 700 }}>训练回顾</h1><div style={{ display: "flex", gap: 8 }}><Btn kind="line" onClick={exportSession} style={{ padding: "10px 14px", fontSize: 14 }}><Download size={15} /> 导出记录</Btn><Btn kind="line" onClick={reset} style={{ padding: "10px 14px", fontSize: 14 }}><RotateCcw size={15} /> 再来一套</Btn></div></div>
     {audioCount > 0 && (<div style={{ ...card, marginBottom: 16 }}>
-      <div style={{ fontSize: 12, color: C.faint, lineHeight: 1.5, marginBottom: 10 }}>录音只存在本页内存里,刷新或「再来一套」即丢失 — 想留档请先导出。</div>
+      <div style={{ fontSize: 12, color: C.faint, lineHeight: 1.5, marginBottom: 10 }}>本场(含录音)已自动存入首页的「历史模考记录」,随时可回听。想分享或永久备份,用下面的导出(手机上直接弹分享面板)。</div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <Btn kind="primary" onClick={exportFull} style={{ padding: "10px 14px", fontSize: 13.5, flex: "1 1 auto" }}><Download size={14} /> 导出完整版(拼接录音+全文)</Btn>
         <Btn kind="ghost" onClick={saveAllAudio} style={{ padding: "10px 14px", fontSize: 13.5 }}><Download size={14} /> 逐题录音 ({audioCount})</Btn>
@@ -736,7 +789,7 @@ export default function App() {
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: (r.segs.length || r.audioUrl) ? 12 : 0 }}><Mini label="收尾用时" value={`${f1(r.finishT)}s`} />{r.latency != null && <Mini label="开口延迟" value={`${f1(r.latency)}s`} />}{r.wpm && <Mini label="语速" value={`${r.wpm} wpm`} />}{r.words > 0 && <Mini label="词数" value={`${r.words}`} />}</div>
       {r.audioUrl && (<div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: r.segs.length ? 12 : 0 }}>
         <audio controls src={r.audioUrl} style={{ flex: 1, minWidth: 0, height: 36 }} />
-        <button onClick={() => dlUrl(r.audioUrl, `SPEAK_${stamp}_${safeName(r.n)}.${extFromMime(r.audioMime)}`)} title="保存这题录音" style={{ display: "inline-flex", alignItems: "center", gap: 5, background: C.surface2, color: C.text, border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}><Download size={13} /> 保存</button>
+        <button onClick={() => { const name = `SPEAK_${stamp}_${safeName(r.n)}.${extFromMime(r.audioMime)}`; if (r.audioBlob) shareOrDownload([{ blob: r.audioBlob, name }]); else dlUrl(r.audioUrl, name); }} title="保存这题录音" style={{ display: "inline-flex", alignItems: "center", gap: 5, background: C.surface2, color: C.text, border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}><Download size={13} /> 保存</button>
       </div>)}
       {r.segs.length > 0 && (<div><div style={{ fontSize: 12, color: C.faint, marginBottom: 8, display: "flex", justifyContent: "space-between" }}><span>分句计时</span><span>每句耗时</span></div>
         {r.segs.map((s, j) => { const w = clamp((s.dur / r.limit) * 100, 4, 100); return (<div key={j} style={{ marginBottom: 10 }}><div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13.5, lineHeight: 1.4, marginBottom: 3 }}><span style={{ color: C.text }}>{s.text}</span><span style={{ color: C.muted, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{f1(s.dur)}s</span></div><div style={{ height: 4, background: C.line, borderRadius: 2 }}><div style={{ width: `${w}%`, height: "100%", background: C.teal, borderRadius: 2 }} /></div><div style={{ fontSize: 10.5, color: C.faint, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>{f1(s.start)}s → {f1(s.end)}s</div></div>); })}
