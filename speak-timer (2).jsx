@@ -75,7 +75,7 @@ function VBar({ groups, series, yMax, yStep }) {
   const ticks = []; for (let v = 0; v <= yMax + 1e-6; v += yStep) ticks.push(v);
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: "block" }}>
-      {ticks.map((t, i) => (<g key={i}><line x1={pL} y1={y(t)} x2={W - pR} y2={y(t)} stroke="#dcd8cc" strokeWidth="1" /><text x={pL - 4} y={y(t) + 3} fontSize="8" textAnchor="end" fill="#666">{t}</text></g>))}
+      {ticks.map((t, i) => (<g key={i}><line x1={pL} y1={y(t)} x2={W - pR} y2={y(t)} stroke="#E4E6E9" strokeWidth="1" /><text x={pL - 4} y={y(t) + 3} fontSize="8" textAnchor="end" fill="#666">{t}</text></g>))}
       {groups.map((g, gi) => { const gx = pL + gi * gw; return (
         <g key={gi}>
           {series.map((s, si) => { const v = g.vals[si]; const bx = gx + gw * 0.17 + si * bw; return <rect key={si} x={bx} y={y(v)} width={bw - 2} height={pT + ph - y(v)} fill={s.color} stroke="#333" strokeWidth="0.4" />; })}
@@ -92,7 +92,7 @@ function HBar({ groups, series, xMax, xStep }) {
   const ticks = []; for (let v = 0; v <= xMax + 1e-6; v += xStep) ticks.push(v);
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: "block" }}>
-      {ticks.map((t, i) => (<g key={i}><line x1={x(t)} y1={pT} x2={x(t)} y2={pT + ph} stroke="#dcd8cc" strokeWidth="1" /><text x={x(t)} y={H - pB + 12} fontSize="7.5" textAnchor="middle" fill="#666">{t}</text></g>))}
+      {ticks.map((t, i) => (<g key={i}><line x1={x(t)} y1={pT} x2={x(t)} y2={pT + ph} stroke="#E4E6E9" strokeWidth="1" /><text x={x(t)} y={H - pB + 12} fontSize="7.5" textAnchor="middle" fill="#666">{t}</text></g>))}
       {groups.map((g, gi) => { const gy = pT + gi * gh; return (
         <g key={gi}>
           {series.map((s, si) => { const v = g.vals[si]; const by = gy + gh * 0.2 + si * bh; return <rect key={si} x={pL} y={by} width={x(v) - pL} height={bh - 1.5} fill={s.color} stroke="#333" strokeWidth="0.4" />; })}
@@ -108,7 +108,7 @@ function MultiLine({ series, xLabels, yMax, yStep }) {
   const ticks = []; for (let v = 0; v <= yMax + 1e-6; v += yStep) ticks.push(v);
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: "block" }}>
-      {ticks.map((t, i) => (<g key={i}><line x1={pL} y1={py(t)} x2={W - pR} y2={py(t)} stroke="#dcd8cc" strokeWidth="1" /><text x={pL - 4} y={py(t) + 3} fontSize="8" textAnchor="end" fill="#666">{t}</text></g>))}
+      {ticks.map((t, i) => (<g key={i}><line x1={pL} y1={py(t)} x2={W - pR} y2={py(t)} stroke="#E4E6E9" strokeWidth="1" /><text x={pL - 4} y={py(t) + 3} fontSize="8" textAnchor="end" fill="#666">{t}</text></g>))}
       {series.map((s, si) => (<g key={si}><polyline points={s.vals.map((v, i) => `${px(i)},${py(v)}`).join(" ")} fill="none" stroke={s.color} strokeWidth="2" />{s.vals.map((v, i) => <circle key={i} cx={px(i)} cy={py(v)} r="2.2" fill={s.color} />)}</g>))}
       {xLabels.map((x, i) => (<text key={i} x={px(i)} y={H - pB + 12} fontSize="8" textAnchor="middle" fill="#333">{x}</text>))}
     </svg>
@@ -123,7 +123,7 @@ function LineChart({ pts, yMax, yStep, projFrom }) {
   const dash = pts.slice(projFrom).map((p, i) => `${px(projFrom + i)},${py(p.y)}`).join(" ");
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: "block" }}>
-      {ticks.map((t, i) => (<g key={i}><line x1={pL} y1={py(t)} x2={W - pR} y2={py(t)} stroke="#dcd8cc" strokeWidth="1" /><text x={pL - 4} y={py(t) + 3} fontSize="8" textAnchor="end" fill="#666">{t}</text></g>))}
+      {ticks.map((t, i) => (<g key={i}><line x1={pL} y1={py(t)} x2={W - pR} y2={py(t)} stroke="#E4E6E9" strokeWidth="1" /><text x={pL - 4} y={py(t) + 3} fontSize="8" textAnchor="end" fill="#666">{t}</text></g>))}
       <polyline points={solid} fill="none" stroke="#1F3A5F" strokeWidth="2" />
       <polyline points={dash} fill="none" stroke="#1F3A5F" strokeWidth="2" strokeDasharray="4 3" />
       {pts.map((p, i) => (<g key={i}><circle cx={px(i)} cy={py(p.y)} r="2.4" fill="#1F3A5F" /><text x={px(i)} y={H - pB + 12} fontSize="8" textAnchor="middle" fill="#333">{p.x}</text></g>))}
@@ -250,10 +250,10 @@ const SCHEDULES = {
 
 function Visual({ v }) {
   if (!v) return null;
-  const card = { background: "#F7F5EF", borderRadius: 14, padding: 12, border: `1px solid ${C.line}`, marginBottom: 16 };
+  const card = { background: "#FFFFFF", borderRadius: 14, padding: 12, border: `1px solid ${C.line}`, marginBottom: 16, boxShadow: "0 1px 3px rgba(30,33,36,0.04)" };
   if (v.kind === "chart") { const c = CHARTS[v.chart]; return (<div style={card}><div style={{ fontSize: 12, fontWeight: 700, color: "#222", textAlign: "center", marginBottom: 6 }}>{c.title}</div>{c.el}{c.series && <Legend series={c.series} />}</div>); }
   if (v.kind === "schedule") return (<div style={card}>{SCHEDULES[v.which]}<div style={{ fontSize: 10.5, marginTop: 8, fontStyle: "italic", color: "#B4462A" }}>斜体 = 手写改动 · 删除线 = 原内容</div></div>);
-  if (v.kind === "panels") return (<div style={card}><div style={{ fontSize: 12, fontWeight: 700, color: "#222", marginBottom: 8 }}>看下面 6 幅图 · 按 1 → 6 讲你看到的故事</div><img src={PANEL_IMG[v.which]} alt="picture story" style={{ width: "100%", display: "block", borderRadius: 8, border: "1px solid #ddd8ca" }} /></div>);
+  if (v.kind === "panels") return (<div style={card}><div style={{ fontSize: 12, fontWeight: 700, color: "#222", marginBottom: 8 }}>看下面 6 幅图 · 按 1 → 6 讲你看到的故事</div><img src={PANEL_IMG[v.which]} alt="picture story" style={{ width: "100%", display: "block", borderRadius: 8, border: "1px solid #E4E6E9" }} /></div>);
   return null;
 }
 
