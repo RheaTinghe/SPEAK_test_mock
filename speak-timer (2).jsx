@@ -433,6 +433,14 @@ export default function App() {
   const mediaRecRef = useRef(null), streamRef = useRef(null), chunksRef = useRef([]), audioCtxRef = useRef(null);
   const speakStartRef = useRef(0), segsRef = useRef([]), lastEndRef = useRef(0), firstSpeechRef = useRef(null), transcriptRef = useRef("");
   const firedRef = useRef({}), finishedRef = useRef(false), curSpeakRef = useRef(45), queueRef = useRef([]), posRef = useRef(0);
+  const proceedRef = useRef(null), ttsUtterRef = useRef(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    const load = () => window.speechSynthesis.getVoices();
+    load();
+    if (window.speechSynthesis.addEventListener) { window.speechSynthesis.addEventListener("voiceschanged", load); return () => window.speechSynthesis.removeEventListener("voiceschanged", load); }
+  }, []);
 
   useEffect(() => { const SR = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition); setSttSupported(!!SR); }, []);
 
@@ -459,14 +467,22 @@ export default function App() {
     let called = false; const done = () => { if (!called) { called = true; if (onDone) onDone(); } };
     if (!readAloud || !text || typeof window === "undefined" || !window.speechSynthesis) { done(); return; }
     try {
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text); u.lang = "en-US"; u.rate = 0.95;
-      const vs = window.speechSynthesis.getVoices();
-      const v = vs.find((x) => x.lang === "en-US" && x.localService) || vs.find((x) => x.lang && x.lang.startsWith("en"));
-      if (v) u.voice = v;
-      u.onend = done; u.onerror = done;
-      window.speechSynthesis.speak(u);
-      setTimeout(done, Math.min(30000, 4000 + text.length * 90));
+      const synth = window.speechSynthesis;
+      synth.cancel();
+      // iOS/Safari: speak() right after cancel() silently fails — delay a beat; keep the
+      // utterance referenced or it can be garbage-collected mid-speech and never fire onend.
+      setTimeout(() => {
+        try {
+          const u = new SpeechSynthesisUtterance(text); u.lang = "en-US"; u.rate = 0.92; u.volume = 1;
+          const vs = synth.getVoices();
+          const v = vs.find((x) => x.lang === "en-US" && x.localService) || vs.find((x) => (x.lang || "").replace("_", "-").indexOf("en") === 0);
+          if (v) u.voice = v;
+          u.onend = done; u.onerror = done;
+          ttsUtterRef.current = u;
+          synth.resume(); synth.speak(u);
+        } catch (e) { done(); }
+      }, 150);
+      setTimeout(done, Math.min(35000, 5000 + text.length * 100));
     } catch (e) { done(); }
   }, [readAloud]);
 
@@ -489,11 +505,20 @@ export default function App() {
   }, [sttSupported, startSTT, startRecorder, beep, stopTTS]);
 
   const beginPrep = useCallback((pos) => {
-    const item = queueRef.current[pos]; setPhase("prep"); setInterim(""); setLiveSegCount(0); setMicError(""); firedRef.current = {}; finishedRef.current = false;
-    if (!item.prep) { speakPrompt(item.prompt, () => beginSpeak(pos)); return; }
-    speakPrompt(item.prompt);
-    phaseEndRef.current = Date.now() + item.prep * 1000; setRemaining(item.prep);
-  }, [beginSpeak, speakPrompt]);
+    const item = queueRef.current[pos]; setInterim(""); setLiveSegCount(0); setMicError(""); firedRef.current = {}; finishedRef.current = false;
+    let advanced = false;
+    const proceed = () => {
+      if (advanced || finishedRef.current) return; advanced = true;
+      if (!item.prep) { beginSpeak(pos); return; }
+      setPhase("prep"); firedRef.current = {};
+      phaseEndRef.current = Date.now() + item.prep * 1000; setRemaining(item.prep);
+    };
+    proceedRef.current = proceed;
+    if (readAloud && typeof window !== "undefined" && window.speechSynthesis) {
+      setPhase("listen"); setRemaining(item.prep || 0);
+      speakPrompt(item.prompt, proceed);
+    } else proceed();
+  }, [beginSpeak, speakPrompt, readAloud]);
 
   const endSpeak = useCallback(async (pos, tapped) => {
     if (finishedRef.current) return; finishedRef.current = true;
@@ -512,7 +537,7 @@ export default function App() {
   }, [stopSTT, stopRecorder, beginPrep]);
 
   const runTick = useCallback(() => {
-    if (finishedRef.current) return;
+    if (finishedRef.current || phase === "listen") return;
     const rem = (phaseEndRef.current - Date.now()) / 1000; setRemaining(rem);
     if (phase === "speak") {
       const cs = curSpeakRef.current; const collect = cs <= 30 ? 8 : 10;
@@ -539,8 +564,9 @@ export default function App() {
 
   const item = queue[qPos];
   let ringColor = C.blue, progress = 0, phaseLabel = "准备";
-  const curLimit = phase === "prep" ? (item?.prep || 1) : (item?.speak || 45);
-  if (phase === "prep") { ringColor = C.blue; progress = clamp(remaining / curLimit, 0, 1); phaseLabel = "准备时间"; }
+  const curLimit = phase === "speak" ? (item?.speak || 45) : (item?.prep || 1);
+  if (phase === "listen") { ringColor = C.blue; progress = 1; phaseLabel = "考官读题"; }
+  else if (phase === "prep") { ringColor = C.blue; progress = clamp(remaining / curLimit, 0, 1); phaseLabel = "准备时间"; }
   else { progress = clamp(remaining / curLimit, 0, 1); phaseLabel = "作答中"; const collect = curLimit <= 30 ? 8 : 10; ringColor = remaining > collect ? C.teal : remaining > 5 ? C.amber : C.red; }
 
   const wrap = { minHeight: "100%", background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif", padding: "22px 18px 40px", boxSizing: "border-box" };
@@ -592,7 +618,7 @@ export default function App() {
     return (<div style={wrap}><div style={container}>
       <div style={{ position: "sticky", top: 0, zIndex: 5, background: C.bg, paddingBottom: 8, marginBottom: 8 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <div style={{ fontSize: 13, color: C.muted }}>{pick === "single" ? item?.n : `${qPos + 1} / ${queue.length}`} · {item?.type} · <span style={{ color: phase === "prep" ? C.blue : C.text }}>{phase === "prep" ? "准备" : "作答"} {f1(Math.max(0, remaining))}s</span></div>
+          <div style={{ fontSize: 13, color: C.muted }}>{pick === "single" ? item?.n : `${qPos + 1} / ${queue.length}`} · {item?.type} · <span style={{ color: phase === "speak" ? C.text : C.blue }}>{phase === "listen" ? "考官读题中…" : phase === "prep" ? `准备 ${f1(Math.max(0, remaining))}s` : `作答 ${f1(Math.max(0, remaining))}s`}</span></div>
           <button onClick={abort} style={{ background: "none", border: "none", color: C.faint, fontSize: 13, cursor: "pointer" }}>结束</button>
         </div>
         <div style={{ height: 4, background: C.line, borderRadius: 2 }}><div style={{ width: `${progress * 100}%`, height: "100%", background: ringColor, borderRadius: 2, transition: "width .12s linear, background .35s" }} /></div>
@@ -604,7 +630,9 @@ export default function App() {
       {hint && <div style={{ fontSize: 12, color: C.amber, background: "rgba(246,178,75,0.08)", border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px 12px", marginBottom: 16, lineHeight: 1.5 }}>⏱ {hint}</div>}
       {item?.visual && <Visual v={item.visual} />}
       <div style={{ marginBottom: 16 }}><Ring progress={progress} color={ringColor} remaining={remaining} phaseLabel={phaseLabel} limit={curLimit} showTarget={phase === "speak"} /></div>
-      {phase === "prep" ? (
+      {phase === "listen" ? (
+        <Btn kind="line" onClick={() => { stopTTS(); if (proceedRef.current) proceedRef.current(); }} style={{ width: "100%" }}>跳过读题 <ArrowRight size={16} /></Btn>
+      ) : phase === "prep" ? (
         <Btn kind="line" onClick={() => beginSpeak(posRef.current)} style={{ width: "100%" }}>跳过准备,直接作答 <ArrowRight size={16} /></Btn>
       ) : (<>
         <Btn kind="primary" onClick={() => endSpeak(posRef.current, true)} style={{ width: "100%", padding: 16, fontSize: 17 }}><Check size={19} /> 我说完了</Btn>
