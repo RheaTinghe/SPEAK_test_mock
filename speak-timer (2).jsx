@@ -471,7 +471,7 @@ export default function App() {
   const speakStartRef = useRef(0), segsRef = useRef([]), lastEndRef = useRef(0), firstSpeechRef = useRef(null), transcriptRef = useRef("");
   const firedRef = useRef({}), finishedRef = useRef(false), curSpeakRef = useRef(45), queueRef = useRef([]), posRef = useRef(0);
   const proceedRef = useRef(null), ttsUtterRef = useRef(null);
-  const savedRef = useRef(false), fromHistoryRef = useRef(false);
+  const savedRef = useRef(false), fromHistoryRef = useRef(false), sttFailsRef = useRef(0);
 
   useEffect(() => { if (screen === "setup" || screen === "history") dbAll().then((l) => setHistory(l.sort((a, b) => b.when - a.when))).catch(() => {}); }, [screen]);
   useEffect(() => {
@@ -498,7 +498,7 @@ export default function App() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SR) return;
     const rec2 = new SR(); rec2.continuous = true; rec2.interimResults = true; rec2.lang = "en-US";
     rec2.onresult = (ev) => {
-      setSttStatus("");
+      setSttStatus(""); sttFailsRef.current = 0;
       const now = (Date.now() - speakStartRef.current) / 1000; if (firstSpeechRef.current == null) firstSpeechRef.current = now; let it = "";
       for (let i = ev.resultIndex; i < ev.results.length; i++) { const res = ev.results[i]; const txt = res[0].transcript.trim(); if (res.isFinal) { if (txt) { const start = lastEndRef.current || firstSpeechRef.current || 0; segsRef.current.push({ text: txt, start, end: now, dur: Math.max(0, now - start) }); lastEndRef.current = now; transcriptRef.current = (transcriptRef.current + " " + txt).trim(); setLiveSegCount(segsRef.current.length); } } else it += txt + " "; }
       setInterim(it.trim());
@@ -506,10 +506,16 @@ export default function App() {
     rec2.onerror = (e) => {
       const err = e.error || "";
       if (err === "not-allowed" || err === "service-not-allowed") { setMicError("麦克风不可用 — 计时和录音仍工作,但无法转文字。"); shouldListenRef.current = false; }
-      else if (err && err !== "no-speech" && err !== "aborted") setSttStatus(err === "audio-capture" ? "拿不到麦克风" : err === "network" ? "识别服务网络错误" : err);
+      else if (err && err !== "no-speech" && err !== "aborted") { sttFailsRef.current += 1; setSttStatus(err === "audio-capture" ? "拿不到麦克风" : err === "network" ? "识别服务网络错误" : err); }
     };
-    // 结束后不复用旧实例(部分浏览器上 start() 会抛错导致识别永久停止),改为新建实例重启
-    rec2.onend = () => { if (recRef.current === rec2) recRef.current = null; if (shouldListenRef.current) setTimeout(() => { if (shouldListenRef.current && !recRef.current && startSTTRef.current) startSTTRef.current(); }, 250); };
+    // 结束后不复用旧实例(部分浏览器上 start() 会抛错导致识别永久停止),改为新建实例重启;
+    // 连续失败 3 次(如识别服务连不上)就放弃转写,避免高频重开麦克风干扰录音
+    rec2.onend = () => {
+      if (recRef.current === rec2) recRef.current = null;
+      if (!shouldListenRef.current) return;
+      if (sttFailsRef.current >= 3) { shouldListenRef.current = false; setSttStatus("转写服务连不上,本题仅录音"); return; }
+      setTimeout(() => { if (shouldListenRef.current && !recRef.current && startSTTRef.current) startSTTRef.current(); }, 500);
+    };
     try { rec2.start(); } catch (e) {} recRef.current = rec2;
   }, []);
   const startSTTRef = useRef(null);
@@ -550,7 +556,7 @@ export default function App() {
   /* 每题作答时才打开麦克风,答完立即释放 — 长期占用会与部分浏览器的语音识别抢音频通道 */
   const startRecorder = useCallback(async () => {
     if (!recordAudio) return;
-    try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); streamRef.current = stream; chunksRef.current = []; const mr = new MediaRecorder(stream); mr.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); }; mr.start(); mediaRecRef.current = mr; } catch (e) {}
+    try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); streamRef.current = stream; chunksRef.current = []; const mr = new MediaRecorder(stream); mr.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); }; mr.start(); mediaRecRef.current = mr; } catch (e) { setMicError("录音启动失败 — 请检查浏览器麦克风权限。"); }
   }, [recordAudio]);
   const stopRecorder = useCallback(() => new Promise((resolve) => {
     const mr = mediaRecRef.current; if (!mr || mr.state === "inactive") { resolve(null); return; }
@@ -561,7 +567,7 @@ export default function App() {
   const beginSpeak = useCallback(async (pos) => {
     stopTTS();
     const item = queueRef.current[pos]; setPhase("speak"); firedRef.current = {}; finishedRef.current = false;
-    segsRef.current = []; lastEndRef.current = 0; firstSpeechRef.current = null; transcriptRef.current = ""; setLiveSegCount(0); setInterim(""); setSttStatus("");
+    segsRef.current = []; lastEndRef.current = 0; firstSpeechRef.current = null; transcriptRef.current = ""; setLiveSegCount(0); setInterim(""); setSttStatus(""); sttFailsRef.current = 0;
     curSpeakRef.current = item.speak; speakStartRef.current = Date.now(); phaseEndRef.current = Date.now() + item.speak * 1000; setRemaining(item.speak);
     if (readAloud) await new Promise((r) => setTimeout(r, 200)); // 等朗读彻底停干净,避免录进考官声音
     // 识别先启动、录音后启动 — 与最初稳定版一致;顺序反过来时部分设备识别器拿不到麦克风
