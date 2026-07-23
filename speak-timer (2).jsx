@@ -464,6 +464,7 @@ export default function App() {
   const [results, setResults] = useState([]);
   const [sttSupported, setSttSupported] = useState(true);
   const [micError, setMicError] = useState("");
+  const [sttStatus, setSttStatus] = useState("");
 
   const phaseEndRef = useRef(0), tickRef = useRef(null), recRef = useRef(null), shouldListenRef = useRef(false);
   const mediaRecRef = useRef(null), streamRef = useRef(null), chunksRef = useRef([]), audioCtxRef = useRef(null);
@@ -497,20 +498,25 @@ export default function App() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SR) return;
     const rec2 = new SR(); rec2.continuous = true; rec2.interimResults = true; rec2.lang = "en-US";
     rec2.onresult = (ev) => {
+      setSttStatus("");
       const now = (Date.now() - speakStartRef.current) / 1000; if (firstSpeechRef.current == null) firstSpeechRef.current = now; let it = "";
       for (let i = ev.resultIndex; i < ev.results.length; i++) { const res = ev.results[i]; const txt = res[0].transcript.trim(); if (res.isFinal) { if (txt) { const start = lastEndRef.current || firstSpeechRef.current || 0; segsRef.current.push({ text: txt, start, end: now, dur: Math.max(0, now - start) }); lastEndRef.current = now; transcriptRef.current = (transcriptRef.current + " " + txt).trim(); setLiveSegCount(segsRef.current.length); } } else it += txt + " "; }
       setInterim(it.trim());
     };
-    rec2.onerror = (e) => { if (e.error === "not-allowed" || e.error === "service-not-allowed") { setMicError("麦克风不可用 — 计时和录音仍工作,但无法转文字。"); shouldListenRef.current = false; } };
+    rec2.onerror = (e) => {
+      const err = e.error || "";
+      if (err === "not-allowed" || err === "service-not-allowed") { setMicError("麦克风不可用 — 计时和录音仍工作,但无法转文字。"); shouldListenRef.current = false; }
+      else if (err && err !== "no-speech" && err !== "aborted") setSttStatus(err === "audio-capture" ? "拿不到麦克风" : err === "network" ? "识别服务网络错误" : err);
+    };
     // 结束后不复用旧实例(部分浏览器上 start() 会抛错导致识别永久停止),改为新建实例重启
-    rec2.onend = () => { if (recRef.current === rec2) recRef.current = null; if (shouldListenRef.current) setTimeout(() => { if (shouldListenRef.current && !recRef.current && startSTTRef.current) startSTTRef.current(); }, 120); };
+    rec2.onend = () => { if (recRef.current === rec2) recRef.current = null; if (shouldListenRef.current) setTimeout(() => { if (shouldListenRef.current && !recRef.current && startSTTRef.current) startSTTRef.current(); }, 250); };
     try { rec2.start(); } catch (e) {} recRef.current = rec2;
   }, []);
   const startSTTRef = useRef(null);
   useEffect(() => { startSTTRef.current = startSTT; }, [startSTT]);
   const stopSTT = useCallback(() => { shouldListenRef.current = false; if (recRef.current) { try { recRef.current.stop(); } catch (e) {} recRef.current = null; } }, []);
 
-  const stopTTS = useCallback(() => { try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {} }, []);
+  const stopTTS = useCallback(() => { try { if (window.speechSynthesis) { window.speechSynthesis.cancel(); window.speechSynthesis.resume(); } } catch (e) {} }, []);
   const speakPrompt = useCallback((text, onDone) => {
     let called = false, keepAlive = null; const timers = [];
     const done = () => { if (called) return; called = true; timers.forEach(clearTimeout); if (keepAlive) clearInterval(keepAlive); if (onDone) onDone(); };
@@ -555,15 +561,17 @@ export default function App() {
   const beginSpeak = useCallback(async (pos) => {
     stopTTS();
     const item = queueRef.current[pos]; setPhase("speak"); firedRef.current = {}; finishedRef.current = false;
-    segsRef.current = []; lastEndRef.current = 0; firstSpeechRef.current = null; transcriptRef.current = ""; setLiveSegCount(0); setInterim("");
+    segsRef.current = []; lastEndRef.current = 0; firstSpeechRef.current = null; transcriptRef.current = ""; setLiveSegCount(0); setInterim(""); setSttStatus("");
     curSpeakRef.current = item.speak; speakStartRef.current = Date.now(); phaseEndRef.current = Date.now() + item.speak * 1000; setRemaining(item.speak);
     if (readAloud) await new Promise((r) => setTimeout(r, 200)); // 等朗读彻底停干净,避免录进考官声音
+    // 识别先启动、录音后启动 — 与最初稳定版一致;顺序反过来时部分设备识别器拿不到麦克风
+    shouldListenRef.current = true; if (sttSupported) startSTT();
     await startRecorder();
     if (finishedRef.current) return;
     // 计时以麦克风就绪为准重置 — 权限弹窗/设备启动的时间不占用作答时间
     speakStartRef.current = Date.now(); phaseEndRef.current = Date.now() + item.speak * 1000; setRemaining(item.speak);
-    beep(660, 0.08, 0.12); shouldListenRef.current = true; if (sttSupported) startSTT();
-  }, [sttSupported, startSTT, startRecorder, beep, stopTTS]);
+    beep(660, 0.08, 0.12);
+  }, [sttSupported, startSTT, startRecorder, beep, stopTTS, readAloud]);
 
   const beginPrep = useCallback((pos) => {
     const item = queueRef.current[pos]; setInterim(""); setLiveSegCount(0); setMicError(""); firedRef.current = {}; finishedRef.current = false;
@@ -736,7 +744,7 @@ export default function App() {
       ) : (<>
         <Btn kind="primary" onClick={() => endSpeak(posRef.current, true)} style={{ width: "100%", padding: 16, fontSize: 17 }}><Check size={19} /> 我说完了</Btn>
         <div style={{ minHeight: 64, marginTop: 14, ...card, background: C.surface2 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.faint, marginBottom: 6 }}><span>实时转写{!sttSupported ? "(本设备不支持)" : ""}</span><span>{liveSegCount} 句</span></div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.faint, marginBottom: 6 }}><span>实时转写{!sttSupported ? "(本设备不支持)" : sttStatus ? <span style={{ color: C.amber }}>({sttStatus})</span> : ""}</span><span>{liveSegCount} 句</span></div>
           <div style={{ fontSize: 14, lineHeight: 1.5, color: C.muted }}>{sttSupported ? (transcriptRef.current ? <span style={{ color: C.text }}>{transcriptRef.current} </span> : null) : <span style={{ color: C.faint }}>正在录音…</span>}<span style={{ color: C.faint }}>{interim}</span></div>
         </div>
       </>)}
