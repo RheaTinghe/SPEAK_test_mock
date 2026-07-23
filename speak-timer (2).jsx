@@ -449,6 +449,7 @@ export default function App() {
   const [readAloud, setReadAloud] = useState(true);
   const [voices, setVoices] = useState([]);
   const [voiceName, setVoiceName] = useState("");
+  const [ttsRate, setTtsRate] = useState(0.95);
   const [history, setHistory] = useState([]);
   const [sessionName, setSessionName] = useState("");
 
@@ -466,7 +467,7 @@ export default function App() {
   const mediaRecRef = useRef(null), streamRef = useRef(null), chunksRef = useRef([]), audioCtxRef = useRef(null);
   const speakStartRef = useRef(0), segsRef = useRef([]), lastEndRef = useRef(0), firstSpeechRef = useRef(null), transcriptRef = useRef("");
   const firedRef = useRef({}), finishedRef = useRef(false), curSpeakRef = useRef(45), queueRef = useRef([]), posRef = useRef(0);
-  const proceedRef = useRef(null), ttsUtterRef = useRef(null), micPromiseRef = useRef(null);
+  const proceedRef = useRef(null), ttsUtterRef = useRef(null);
   const savedRef = useRef(false), fromHistoryRef = useRef(false);
 
   useEffect(() => { if (screen === "setup" || screen === "history") dbAll().then((l) => setHistory(l.sort((a, b) => b.when - a.when))).catch(() => {}); }, [screen]);
@@ -519,7 +520,7 @@ export default function App() {
       // iOS/Safari: cancel 后立刻 speak 会静默失败,延迟一拍;保留 utterance 引用防止被 GC
       timers.push(setTimeout(() => {
         try {
-          const u = new SpeechSynthesisUtterance(text); u.lang = "en-US"; u.rate = 1; u.volume = 1;
+          const u = new SpeechSynthesisUtterance(text); u.lang = "en-US"; u.rate = ttsRate; u.volume = 1;
           const v = pickVoice(synth.getVoices(), voiceName);
           if (v) u.voice = v;
           let started = false;
@@ -533,26 +534,19 @@ export default function App() {
           timers.push(setTimeout(() => { if (!started) { try { synth.cancel(); } catch (e) {} done(); } }, 3000));
         } catch (e) { done(); }
       }, 150));
-      timers.push(setTimeout(done, Math.min(35000, 4000 + text.length * 80)));
+      timers.push(setTimeout(done, Math.min(60000, 4000 + (text.length * 85) / ttsRate)));
     } catch (e) { done(); }
-  }, [readAloud, voiceName]);
+  }, [readAloud, voiceName, ttsRate]);
 
-  const getMic = useCallback(() => {
-    if (!micPromiseRef.current) micPromiseRef.current = navigator.mediaDevices.getUserMedia({ audio: true });
-    return micPromiseRef.current;
-  }, []);
-  const releaseMic = useCallback(() => { if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; micPromiseRef.current = null; }, []);
+  const releaseMic = useCallback(() => { if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; }, []);
+  /* 每题作答时才打开麦克风,答完立即释放 — 长期占用会与部分浏览器的语音识别抢音频通道 */
   const startRecorder = useCallback(async () => {
     if (!recordAudio) return;
-    try {
-      let stream = await getMic();
-      if (!stream.getTracks().some((t) => t.readyState === "live")) { micPromiseRef.current = null; stream = await getMic(); }
-      streamRef.current = stream; chunksRef.current = []; const mr = new MediaRecorder(stream); mr.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); }; mr.start(); mediaRecRef.current = mr;
-    } catch (e) { micPromiseRef.current = null; }
-  }, [recordAudio, getMic]);
+    try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); streamRef.current = stream; chunksRef.current = []; const mr = new MediaRecorder(stream); mr.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); }; mr.start(); mediaRecRef.current = mr; } catch (e) {}
+  }, [recordAudio]);
   const stopRecorder = useCallback(() => new Promise((resolve) => {
     const mr = mediaRecRef.current; if (!mr || mr.state === "inactive") { resolve(null); return; }
-    mr.onstop = () => { const blob = new Blob(chunksRef.current, { type: chunksRef.current[0]?.type || "audio/webm" }); const url = URL.createObjectURL(blob); resolve({ url, mime: blob.type, blob }); };
+    mr.onstop = () => { const blob = new Blob(chunksRef.current, { type: chunksRef.current[0]?.type || "audio/webm" }); const url = URL.createObjectURL(blob); if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; } resolve({ url, mime: blob.type, blob }); };
     try { mr.stop(); } catch (e) { resolve(null); }
   }), []);
 
@@ -561,6 +555,7 @@ export default function App() {
     const item = queueRef.current[pos]; setPhase("speak"); firedRef.current = {}; finishedRef.current = false;
     segsRef.current = []; lastEndRef.current = 0; firstSpeechRef.current = null; transcriptRef.current = ""; setLiveSegCount(0); setInterim("");
     curSpeakRef.current = item.speak; speakStartRef.current = Date.now(); phaseEndRef.current = Date.now() + item.speak * 1000; setRemaining(item.speak);
+    if (readAloud) await new Promise((r) => setTimeout(r, 200)); // 等朗读彻底停干净,避免录进考官声音
     await startRecorder();
     if (finishedRef.current) return;
     // 计时以麦克风就绪为准重置 — 权限弹窗/设备启动的时间不占用作答时间
@@ -623,7 +618,7 @@ export default function App() {
     savedRef.current = false; fromHistoryRef.current = false;
     setSessionName(pick === "single" ? "单题练习" : (SETS.find((s) => s.key === pick)?.name || ""));
     try { if (readAloud && window.speechSynthesis) { window.speechSynthesis.cancel(); window.speechSynthesis.speak(new SpeechSynthesisUtterance(" ")); } } catch (e) {}
-    if (recordAudio) getMic().catch(() => { micPromiseRef.current = null; });
+    if (recordAudio && navigator.mediaDevices) navigator.mediaDevices.getUserMedia({ audio: true }).then((s) => s.getTracks().forEach((t) => t.stop())).catch(() => {});
     queueRef.current = q; posRef.current = 0; setQueue(q); setQPos(0); setResults([]); setScreen("active"); setTimeout(() => beginPrep(0), 60);
   };
   const abort = () => { shouldListenRef.current = false; finishedRef.current = true; stopSTT(); stopTTS(); if (mediaRecRef.current && mediaRecRef.current.state !== "inactive") { try { mediaRecRef.current.stop(); } catch (e) {} } mediaRecRef.current = null; releaseMic(); clearInterval(tickRef.current); setScreen(results.length ? "review" : "setup"); };
@@ -686,6 +681,10 @@ export default function App() {
             {voices.map((v) => <option key={v.name} value={v.name}>{v.name}{NOVELTY_VOICE.test(v.name) ? " (恶搞)" : ""} · {v.lang}</option>)}
           </select>
           <Btn kind="ghost" onClick={() => speakPrompt("Tell me about your field of study. You will have thirty seconds to answer.")} style={{ padding: "10px 14px", fontSize: 13.5, flexShrink: 0 }}>试听</Btn>
+        </div>)}
+        {readAloud && (<div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 6, fontWeight: 600 }}>读题语速</div>
+          <Seg options={[{ v: 0.8, label: "慢" }, { v: 0.95, label: "适中" }, { v: 1.1, label: "快" }]} value={ttsRate} onChange={setTtsRate} />
         </div>)}
       </div>
       {!sttSupported && (<div style={{ ...card, borderColor: C.amber, marginBottom: 16, display: "flex", gap: 10, alignItems: "flex-start" }}><AlertTriangle size={18} color={C.amber} style={{ flexShrink: 0, marginTop: 1 }} /><div style={{ fontSize: 13, color: C.muted, lineHeight: 1.5 }}>当前浏览器不支持实时转文字(iOS Safari / 部分 App 内置浏览器)。<b style={{ color: C.text }}>计时、变色环、提示音、录音回放照常</b>。要逐句文字复盘请用电脑版 Chrome / Edge。</div></div>)}
