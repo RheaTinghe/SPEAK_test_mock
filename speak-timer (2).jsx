@@ -498,32 +498,42 @@ export default function App() {
       for (let i = ev.resultIndex; i < ev.results.length; i++) { const res = ev.results[i]; const txt = res[0].transcript.trim(); if (res.isFinal) { if (txt) { const start = lastEndRef.current || firstSpeechRef.current || 0; segsRef.current.push({ text: txt, start, end: now, dur: Math.max(0, now - start) }); lastEndRef.current = now; transcriptRef.current = (transcriptRef.current + " " + txt).trim(); setLiveSegCount(segsRef.current.length); } } else it += txt + " "; }
       setInterim(it.trim());
     };
-    rec2.onerror = (e) => { if (e.error === "not-allowed" || e.error === "service-not-allowed") setMicError("麦克风不可用 — 计时和录音仍工作,但无法转文字。"); };
-    rec2.onend = () => { if (shouldListenRef.current) { try { rec2.start(); } catch (e) {} } };
+    rec2.onerror = (e) => { if (e.error === "not-allowed" || e.error === "service-not-allowed") { setMicError("麦克风不可用 — 计时和录音仍工作,但无法转文字。"); shouldListenRef.current = false; } };
+    // 结束后不复用旧实例(部分浏览器上 start() 会抛错导致识别永久停止),改为新建实例重启
+    rec2.onend = () => { if (recRef.current === rec2) recRef.current = null; if (shouldListenRef.current) setTimeout(() => { if (shouldListenRef.current && !recRef.current && startSTTRef.current) startSTTRef.current(); }, 120); };
     try { rec2.start(); } catch (e) {} recRef.current = rec2;
   }, []);
+  const startSTTRef = useRef(null);
+  useEffect(() => { startSTTRef.current = startSTT; }, [startSTT]);
   const stopSTT = useCallback(() => { shouldListenRef.current = false; if (recRef.current) { try { recRef.current.stop(); } catch (e) {} recRef.current = null; } }, []);
 
   const stopTTS = useCallback(() => { try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {} }, []);
   const speakPrompt = useCallback((text, onDone) => {
-    let called = false; const done = () => { if (!called) { called = true; if (onDone) onDone(); } };
+    let called = false, keepAlive = null; const timers = [];
+    const done = () => { if (called) return; called = true; timers.forEach(clearTimeout); if (keepAlive) clearInterval(keepAlive); if (onDone) onDone(); };
     if (!readAloud || !text || typeof window === "undefined" || !window.speechSynthesis) { done(); return; }
     try {
       const synth = window.speechSynthesis;
-      synth.cancel();
-      // iOS/Safari: speak() right after cancel() silently fails — delay a beat; keep the
-      // utterance referenced or it can be garbage-collected mid-speech and never fire onend.
-      setTimeout(() => {
+      // 只在确有排队/播放时 cancel — Chrome 上无脑 cancel 会让引擎卡在暂停态不出声
+      if (synth.speaking || synth.pending) synth.cancel();
+      // iOS/Safari: cancel 后立刻 speak 会静默失败,延迟一拍;保留 utterance 引用防止被 GC
+      timers.push(setTimeout(() => {
         try {
-          const u = new SpeechSynthesisUtterance(text); u.lang = "en-US"; u.rate = 0.92; u.volume = 1;
+          const u = new SpeechSynthesisUtterance(text); u.lang = "en-US"; u.rate = 1; u.volume = 1;
           const v = pickVoice(synth.getVoices(), voiceName);
           if (v) u.voice = v;
+          let started = false;
+          u.onstart = () => { started = true; };
           u.onend = done; u.onerror = done;
           ttsUtterRef.current = u;
           synth.resume(); synth.speak(u);
+          // Chrome 长句会中途暂停,定期 resume 保活
+          keepAlive = setInterval(() => { try { synth.resume(); } catch (e) {} }, 5000);
+          // 3 秒还没开讲视为引擎卡死,跳过读题直接进入下一阶段
+          timers.push(setTimeout(() => { if (!started) { try { synth.cancel(); } catch (e) {} done(); } }, 3000));
         } catch (e) { done(); }
-      }, 150);
-      setTimeout(done, Math.min(35000, 5000 + text.length * 100));
+      }, 150));
+      timers.push(setTimeout(done, Math.min(35000, 4000 + text.length * 80)));
     } catch (e) { done(); }
   }, [readAloud, voiceName]);
 
