@@ -42,7 +42,9 @@ const pickVoice = (vs, wantName) => {
   if (wantName) { const hit = en.find((v) => v.name === wantName); if (hit) return hit; }
   const good = en.filter((v) => !NOVELTY_VOICE.test(v.name));
   const isUS = (v) => (v.lang || "").replace("_", "-") === "en-US";
-  return good.find((v) => PREFERRED_VOICE.test(v.name) && isUS(v)) || good.find((v) => PREFERRED_VOICE.test(v.name)) || good.find(isUS) || good[0] || en[0] || null;
+  // 本地语音优先(联网语音开口延迟大且不稳定),其次偏好名单,再次美音
+  const score = (v) => (v.localService ? 0 : 4) + (PREFERRED_VOICE.test(v.name) ? 0 : 2) + (isUS(v) ? 0 : 1);
+  return good.sort((a, b) => score(a) - score(b))[0] || en[0] || null;
 };
 const encodeWav = (parts, sampleRate) => {
   let len = 0; parts.forEach((p) => { len += p.length; });
@@ -530,8 +532,8 @@ export default function App() {
           synth.resume(); synth.speak(u);
           // Chrome 长句会中途暂停,定期 resume 保活
           keepAlive = setInterval(() => { try { synth.resume(); } catch (e) {} }, 5000);
-          // 3 秒还没开讲视为引擎卡死,跳过读题直接进入下一阶段
-          timers.push(setTimeout(() => { if (!started) { try { synth.cancel(); } catch (e) {} done(); } }, 3000));
+          // 6 秒既没触发 onstart 也没在播,才视为引擎卡死跳过读题(联网语音开口可能要几秒)
+          timers.push(setTimeout(() => { if (!started && !synth.speaking) { try { synth.cancel(); } catch (e) {} done(); } }, 6000));
         } catch (e) { done(); }
       }, 150));
       timers.push(setTimeout(done, Math.min(60000, 4000 + (text.length * 85) / ttsRate)));
