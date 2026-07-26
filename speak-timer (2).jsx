@@ -6,6 +6,7 @@ const C = {
   bg: "#F7F7F8", surface: "#FFFFFF", surface2: "#F2F3F4", line: "#E5E7E9",
   text: "#1E2124", muted: "#6C737B", faint: "#A3A9B0",
   teal: "#2E3238", amber: "#C9861F", red: "#C2504A", blue: "#64748B", green: "#5E8C6E",
+  purple: "#7A6AA3", rust: "#B4653A",
 };
 const f1 = (n) => (Math.round(n * 10) / 10).toFixed(1);
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
@@ -255,7 +256,7 @@ function Visual({ v }) {
   const card = { background: "#FFFFFF", borderRadius: 14, padding: 12, border: `1px solid ${C.line}`, marginBottom: 16, boxShadow: "0 1px 3px rgba(30,33,36,0.04)" };
   if (v.kind === "chart") { const c = CHARTS[v.chart]; return (<div style={card}><div style={{ fontSize: 12, fontWeight: 700, color: "#222", textAlign: "center", marginBottom: 6 }}>{c.title}</div>{c.el}{c.series && <Legend series={c.series} />}</div>); }
   if (v.kind === "schedule") return (<div style={card}>{SCHEDULES[v.which]}<div style={{ fontSize: 10.5, marginTop: 8, fontStyle: "italic", color: "#B4462A" }}>斜体 = 手写改动 · 删除线 = 原内容</div></div>);
-  if (v.kind === "panels") return (<div style={card}><div style={{ fontSize: 12, fontWeight: 700, color: "#222", marginBottom: 8 }}>看下面 6 幅图 · 按 1 → 6 讲你看到的故事</div><img src={PANEL_IMG[v.which]} alt="picture story" style={{ width: "100%", display: "block", borderRadius: 8, border: "1px solid #E4E6E9" }} /></div>);
+  if (v.kind === "panels") return (<div style={card}><div style={{ fontSize: 12, fontWeight: 700, color: "#222", marginBottom: 8 }}>{v.cap || "看下面 6 幅图 · 按 1 → 6 讲你看到的故事"}</div><img src={PANEL_IMG[v.which]} alt="picture story" style={{ width: "100%", display: "block", borderRadius: 8, border: "1px solid #E4E6E9" }} /></div>);
   return null;
 }
 
@@ -270,6 +271,12 @@ const gphf = (n, prompt, chart) => ({ n, type: "Graph follow-up", prompt, prep: 
 const story = (n, which) => ({ n, type: "Picture story", prompt: SP, prep: 60, speak: 60, visual: { kind: "panels", which } });
 const foll = (n, prompt, which, type = "Picture follow-up") => ({ n, type, prompt, prep: 0, speak: 30, visual: { kind: "panels", which } });
 const sch = (n, prompt, which) => ({ n, type: "Schedule", prompt, prep: 30, speak: 60, visual: { kind: "schedule", which } });
+// ↓ SPEAK Part 3 题型(取自 Toward Speaking Excellence 第17–19章)
+const desc = (n, prompt) => ({ n, type: "Describe", prompt, prep: 0, speak: 60 });
+const def = (n, prompt) => ({ n, type: "Define/Explain", prompt, prep: 0, speak: 60 });
+// 建议说服:可选配一张场景图(复用看图故事的图),换成说服题专用说明
+const persuade = (n, prompt, which) => ({ n, type: "Suggest & Persuade", prompt, prep: 0, speak: 45, ...(which ? { visual: { kind: "panels", which, cap: "看下面的情景图 · 你是图中的当事人" } } : {}) });
+const suggest = (n, prompt, which) => ({ n, type: "Suggest & Persuade", prompt, prep: 0, speak: 30, ...(which ? { visual: { kind: "panels", which, cap: "看下面的情景图 · 你是图中的当事人" } } : {}) });
 
 const setA = [
   rec("Question 1", "I'm a nature lover and I'm thinking about visiting your hometown. Recommend a place to go to enjoy nature during my visit."),
@@ -378,6 +385,38 @@ const schedSet = [
   sch("日程 8 · 艺术馆参观", "You are a TA briefing your art class about a museum visit and the last-minute changes. Remind them of the details and the changes.", "art"),
 ];
 
+/* ---------- SPEAK 第17章:描述专项(讲最喜欢的电影/书/食物…) ---------- */
+const describeSet = [
+  desc("描述 1 · 电影", "Think of one of your favorite movies. Please tell me about the movie and why you find it interesting."),
+  desc("描述 2 · 书", "Tell me about a recent book you've read and why you like it."),
+  desc("描述 3 · 报刊", "Please tell me about your favorite newspaper or magazine and why you like it."),
+  desc("描述 4 · 早餐", "Please tell me about one of your favorite breakfast foods and why you like it."),
+  desc("描述 5 · 派对食物", "Imagine you have invited some friends over for a party. Tell me about some food you could serve and give reasons why you think it is good party food."),
+  desc("描述 6 · 宠物", "Tell me about an animal you think would make a good pet and why you think so."),
+  desc("描述 7 · 公园", "It's a sunny day and you are taking a walk in a park in your town. Tell me about the activities you see taking place there and why this park is beneficial to the community."),
+];
+/* ---------- SPEAK 第19章:定义/解释专项 ---------- */
+const defineSet = [
+  def("定义 1 · 专业入门", "Imagine you are a graduate student and a group of high school students come to visit your campus. As you give them a tour of your department, tell them about a basic topic in your area of study."),
+  def("定义 2 · 岗位职责", "Although we are friends, we are interested in different career areas. Think about a typical job position in your field and tell me about the responsibilities of someone with this position."),
+  def("定义 3 · 工具设备", "Imagine that I am a friend who is not familiar with the equipment used in your profession. Think about one tool, piece of equipment, or machinery used frequently in your field and tell me how it is used."),
+  def("定义 4 · 抄袭", "Imagine that I am a student in your class. Define for me what you mean by plagiarism."),
+  def("定义 5 · 优秀研究", "Imagine that I'm a friend who is not familiar with your field of study. Please define for me research that is considered excellent in your field."),
+  def("定义 6 · 政府部门", "Imagine you are at a party where no one else has been to your country. Your friends are interested in your country's government. Choose one branch or division of your government and define it for them."),
+  def("定义 7 · 民主投票", "Explain to me the importance of voting in a democracy, including a few key reasons."),
+  def("定义 8 · 上网", "Imagine I have never used the Internet. Define for me what surfing the Internet is and explain how it works."),
+];
+/* ---------- SPEAK 第18章:建议与说服专项(场景图复用第6章图序) ---------- */
+const persuadeSet = [
+  suggest("建议 1 · 租车", "What could the biker have done specifically to avoid this problem?", "bike"),
+  persuade("说服 1 · 退租车费", "Pretend you are the bike rider in the pictures. After you return the bike, the cashier will not return your money. You believe you deserve a refund, but the rental has a no-refund policy. You call the owner of the bike rental. Try to persuade the owner to refund your five-dollar rental fee.", "bike"),
+  persuade("说服 2 · 餐厅滑倒", "Pretend you are the customer who falls in this scene. Go talk to the manager of the restaurant and convince her to replace your food free of charge.", "wetfloor"),
+  persuade("说服 3 · 脏车约会", "Pretend you are the person in this scene. You have an important date in about an hour and want to make a good impression. You need to shower and change, but you can't leave with a dirty car. Talk to your roommate and convince him or her to clean your car while you get ready.", "carwash"),
+  persuade("说服 4 · 狗毁花园", "Pretend you are the person in this scene. Call the neighbor, who owns the dog, and convince him to buy you new flowers.", "garden"),
+  persuade("说服 5 · 自行车刹车", "Pretend you are the parent of a child with a new bicycle. The brakes break the first day your child uses it. You take the bicycle back to the store. Persuade the store manager to replace the broken parts free of charge."),
+  persuade("说服 6 · 买新电视", "Pretend that although you already have a pretty good TV at home, you really want to buy a new one. Call your spouse and try to persuade him or her that you should buy this new TV set."),
+];
+
 const estMin = (items) => Math.max(1, Math.round(items.reduce((s, i) => s + i.prep + i.speak, 0) / 60));
 const SETS = [
   { key: "1", tag: "全真", name: "标准卷 1", note: "洗车 · 能源图 · 能源会议", items: setA },
@@ -390,9 +429,12 @@ const SETS = [
   { key: "pics", tag: "看图", name: "看图说话专项", note: "6 组图 + 追问,一次过完", items: picsSet },
   { key: "charts", tag: "图表", name: "图表专项", note: "13 张图 + 追问", items: chartsSet },
   { key: "sched", tag: "修改", name: "日程改动专项", note: "8 份手写涂改日程", items: schedSet },
+  { key: "persuade", tag: "说服", name: "建议与说服专项", note: "打电话说服退款/更换 · 复用情景图", items: persuadeSet },
+  { key: "define", tag: "解释", name: "定义与解释专项", note: "定义抄袭/岗位/工具/政府部门…", items: defineSet },
+  { key: "describe", tag: "描述", name: "描述专项", note: "讲最喜欢的电影/书/食物/宠物…", items: describeSet },
 ];
-const TAGC = { 全真: C.teal, 看图: C.blue, 图表: C.amber, 修改: C.green };
-const POOL = [...setA, ...picsSet, ...chartsSet, ...schedSet];
+const TAGC = { 全真: C.teal, 看图: C.blue, 图表: C.amber, 修改: C.green, 说服: C.red, 解释: C.purple, 描述: C.rust };
+const POOL = [...setA, ...picsSet, ...chartsSet, ...schedSet, ...persuadeSet, ...defineSet, ...describeSet];
 
 /* ---------- per-question braking cues (from review handbook ch.6 diagnosis + ch.7 braking) ---------- */
 const HINTS = {
@@ -406,6 +448,9 @@ const HINTS = {
   "Graph": "只讲 1 主线 + 1 对比,数到 2 就收尾 · 数字模糊化(about/over)",
   "Graph follow-up": "两个原因各一句:policy / demographics / technology",
   "Schedule": "逐条报改动 · 编号 First/Second… · 数字放慢重读 · 覆盖全",
+  "Describe": "预告 → 细节(举 1–2 例)→ 收尾鼓励 · 别陷进情节 · The first reason / another reason",
+  "Define/Explain": "先一句定义 → 举例/步骤展开 → 一句总结 · 别堆术语 · For example…",
+  "Suggest & Persuade": "礼貌开场 → 说清问题 → 明确请求 + 理由 → 给台阶(I understand…但…) → Thanks!",
 };
 
 /* ======================= UI atoms ======================= */
