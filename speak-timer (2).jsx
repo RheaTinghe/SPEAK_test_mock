@@ -411,9 +411,7 @@ const defineSet = [
   def("定义 3 · 工具设备", "Imagine that I am a friend who is not familiar with the equipment used in your profession. Think about one tool, piece of equipment, or machinery used frequently in your field and tell me how it is used."),
   def("定义 4 · 抄袭", "Imagine that I am a student in your class. Define for me what you mean by plagiarism."),
   def("定义 5 · 优秀研究", "Imagine that I'm a friend who is not familiar with your field of study. Please define for me research that is considered excellent in your field."),
-  def("定义 6 · 政府部门", "Imagine you are at a party where no one else has been to your country. Your friends are interested in your country's government. Choose one branch or division of your government and define it for them."),
-  def("定义 7 · 民主投票", "Explain to me the importance of voting in a democracy, including a few key reasons."),
-  def("定义 8 · 上网", "Imagine I have never used the Internet. Define for me what surfing the Internet is and explain how it works."),
+  def("定义 6 · 政府部门", "Imagine that you are at a party where no one else attending the party has been to your country. Your friends at the party are interested in the government of your country. Choose one branch or division of government of your country and define it for your friends."),
 ];
 /* ---------- SPEAK 第18章:建议与说服专项(场景图复用第6章图序) ---------- */
 const persuadeSet = [
@@ -608,8 +606,8 @@ export default function App() {
 
   const stopTTS = useCallback(() => { try { if (window.speechSynthesis) { window.speechSynthesis.cancel(); window.speechSynthesis.resume(); } } catch (e) {} }, []);
   const speakPrompt = useCallback((text, onDone) => {
-    let called = false, keepAlive = null; const timers = [];
-    const done = () => { if (called) return; called = true; timers.forEach(clearTimeout); if (keepAlive) clearInterval(keepAlive); if (onDone) onDone(); };
+    let called = false, poll = null; const timers = [];
+    const done = () => { if (called) return; called = true; timers.forEach(clearTimeout); if (poll) clearInterval(poll); if (onDone) onDone(); };
     if (!readAloud || !text || typeof window === "undefined" || !window.speechSynthesis) { done(); return; }
     try {
       const synth = window.speechSynthesis;
@@ -621,18 +619,25 @@ export default function App() {
           const u = new SpeechSynthesisUtterance(text); u.lang = "en-US"; u.rate = ttsRate; u.volume = 1;
           const v = pickVoice(synth.getVoices(), voiceName);
           if (v) u.voice = v;
-          let started = false;
+          let started = false, endStreak = 0;
           u.onstart = () => { started = true; };
           u.onend = done; u.onerror = done;
           ttsUtterRef.current = u;
           synth.resume(); synth.speak(u);
-          // Chrome 长句会中途暂停,定期 resume 保活
-          keepAlive = setInterval(() => { try { synth.resume(); } catch (e) {} }, 5000);
+          // 轮询真实播放状态判断"读完",而不是用固定估时(估时没算引擎启动延迟,会提前结束→抢在读题结束前开录音)。
+          // Chrome 长句会中途自动暂停,顺便 resume 保活。只有确实开口过(started/observed speaking)、
+          // 且随后连续两拍都不再 speaking/pending,才算读完;onend 能触发时它更快,这里是兜底。
+          poll = setInterval(() => {
+            try { synth.resume(); } catch (e) {}
+            if (synth.speaking) started = true;
+            if (started && !synth.speaking && !synth.pending) { if (++endStreak >= 2) done(); } else endStreak = 0;
+          }, 300);
           // 6 秒既没触发 onstart 也没在播,才视为引擎卡死跳过读题(联网语音开口可能要几秒)
           timers.push(setTimeout(() => { if (!started && !synth.speaking) { try { synth.cancel(); } catch (e) {} done(); } }, 6000));
         } catch (e) { done(); }
       }, 150));
-      timers.push(setTimeout(done, Math.min(60000, 4000 + (text.length * 85) / ttsRate)));
+      // 绝对上限兜底:仅防极端情况下永久卡住(远长于任何题目朗读时间)
+      timers.push(setTimeout(done, 90000));
     } catch (e) { done(); }
   }, [readAloud, voiceName, ttsRate]);
 
